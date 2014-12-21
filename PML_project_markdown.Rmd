@@ -1,0 +1,186 @@
+---
+title: "Practical Machine Learning Project"
+author: "Michael J. McCann"
+date: "Friday, December 19, 2014"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE, fig.width=5, fig.height=5)
+```
+
+<br>
+<br> 
+
+# Background 
+
+From the course website: 
+
+>*"Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset)."*
+
+<br>
+<br> 
+
+# Download & Import Data 
+
+Use package `RCurl` to download the the data and load it as `training` and `testing_final`. 
+```{r}
+
+library(RCurl)
+URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+X <- getURL(URL, ssl.verifypeer = FALSE)
+training <- read.csv(textConnection(X))
+
+URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+Y <- getURL(URL, ssl.verifypeer = FALSE)
+testing_final <- read.csv(textConnection(Y))
+
+rm(list=c("URL","X","Y")) # clean up the workspace 
+
+```
+
+<br>
+<br> 
+
+# Subset the Data  
+
+Now we're goign to further divide `training` data into two sets for cross validation. 
+We will call these `training` and `testing`. We'll use the `createDataPartition` function
+in the `caret` package. We'll split the data into 80% for training and 20% for cross-validation
+and we'll do the splitting proportional to our response variable `classe`. 
+```{r}
+
+library(caret)
+inTrain <- createDataPartition(y=training$classe, p=0.8, list=FALSE)
+training <- training[inTrain,]
+testing <- training[-inTrain,]
+rm(inTrain) # clean up your workspace 
+
+```
+
+Now you can see the sizes of our `training` and `testing` data 
+```{r}
+
+dim(training)
+dim(testing)
+
+```
+
+<br>
+<br> 
+
+# Inspect the Data 
+
+Before we fit a model let's take a closer look at our `training` data. 
+
+First, how balanced is the response variable (i.e., outcome we're trying to predict)? 
+```{r}
+summary(training$classe)
+summary(training$classe)/nrow(training)
+```
+This looks *fairly* balanced between different outcomes. Although "A" is a little more common.
+
+Let's look at all of the predictors that we have:
+
+```{r}
+summary(training)
+```
+
+Wow. That's a lot of variables. Let's see if we can remove anything that is not going to 
+be informative 
+<br>
+
+We probably don't want to predict with `training$X`. 
+It is just the observations numbered from 1 to 19622.
+
+```{r}
+summary(training$X)
+```
+
+Remove 'em! And we'll do this for all of our data sets `training` for model building, 
+`testing` for cross-validation, and `testing_final` for the set we're making our actual
+predictions on. 
+
+```{r}
+training$X <- NULL 
+testing$X <- NULL 
+testing_final$X <- NULL 
+```
+
+There are a lot of missing variables. 
+In almost all of the cases where there are NAs, the number of NAs is 19216.
+Most of these variables  are statistics of other columns.
+e.g., kurtosis, skewness, var, min, max, etc. 
+
+Let's remove those variables with tons of missing values. 
+We'll use regular expressions to find all of the columns that you don't want.
+
+```{r}
+var_names <- grep("^(var_|stddev_|avg_|min_|max_|skewness_|kurtosis_|amplitude_)",names(training))
+
+# remove those columns from the training and testing sets and the final testing set too 
+training02 <- training[,-var_names]
+testing02 <- testing[,-var_names]
+testing_final02 <- testing_final[,-var_names]
+```
+
+We'll now call our data sets `training02`, `testing02`, and `testing_final02`.
+
+<br>
+<br> 
+
+# Model Fitting: Random Forest
+
+We're going to fit a random forest model to our data. 
+Random forests are a good method for classification, especially in cases with
+non-linear relationships between variables. 
+```{r}
+
+library(caret)
+
+# run the model 
+set.seed(1235)
+modelFit <- train(classe ~ . , 
+                    method="rf",
+                    verbose=TRUE,
+                    importance=TRUE,
+                    data=training02)
+
+```
+
+Now, let's look at how this model performed 
+```{r}
+print(modelFit)
+```
+
+We've built this model on the `training02` set.
+Now, let's see how well the model did not on `testing02` set.
+```{r}
+
+# predict new values
+pred <- predict(modelFit, testing02)
+
+# confusion matrix on the test data 
+confusionMatrix(pred, testing02$classe)
+
+```
+This looks pretty good. Accuracy is 100% i.e. out-of-bag (OOB) error rate is 0%!
+
+<br>
+
+Let's see which variables were the most important predictors 
+```{r}
+varImp(modelFit)
+```
+
+
+# Final predictions 
+
+Finally, let's make our predictions on the unknown `testing_final02` cases. 
+```{r}
+predictions_final <- predict(modelFit,newdata=testing_final02)
+predictions_final
+```
+
+There you have it. Those are the predictions for how the excercise was performed in 20 final
+test cases. 
